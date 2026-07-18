@@ -23,18 +23,45 @@ export const TARGET_LANGUAGE = "fr";
 
 export const TRUSTED_SOURCES = [
 
-  "Reuters",
+  // Agences / généralistes internationaux confirmés présents dans NewsAPI
+  "BBC News",
+  "CNN",
+  "Al Jazeera English",
+  "NPR",
+  "DW (English)",
+  "CBC News",
+  "CNA",
+  "RTE",
+  "The Irish Times",
+  "The Straits Times",
+
+  // Spécialisés géopolitique / militaire / élections
+  "Foreign Policy",
+  "The Diplomat",
+  "War on the Rocks",
+  "POLITICO.eu",
+  "Hurriyet Daily News",
+
+  // Finance / impact marché (pertinent pour BELIEFX, trading)
   "Bloomberg",
   "CNBC",
+
+  // Conservées au cas où NewsAPI les inclut à l'avenir (absentes des 733
+  // articles testés le 2026-07-18, mais gardées sans coût — une simple
+  // comparaison de texte qui ne matchera juste rien si absentes)
+  "Reuters",
+  "Associated Press",
   "Financial Times",
   "The Wall Street Journal",
-  "BBC News",
-  "Al Jazeera English",
-  "Associated Press",
-  "CNN",
   "The Economist",
   "The Washington Post",
-  "The New York Times"
+  "The New York Times",
+
+  // Médias d'État russes — inclus sur demande explicite (2026-07-18).
+  // À garder en tête : sources à biais éditorial documenté (propagande
+  // d'État), à traiter avec recul dans l'usage final de ces articles.
+  "RT",
+  "Sputnikglobe.com"
 
 ];
 

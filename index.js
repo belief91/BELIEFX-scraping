@@ -15,6 +15,7 @@
 
 import express from "express";
 import * as cheerio from "cheerio";
+import { runGeopoliticalPipeline } from "./geopolitics/pipeline.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -158,6 +159,16 @@ app.get("/scrape/calendar-bc", verifierSecret, async (req, res) => {
     res.json({ success: true, count: evenements.length, data: evenements });
   } catch (error) {
     console.error("Erreur scraping calendrier BC :", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get("/scrape/geopolitics", verifierSecret, async (req, res) => {
+  try {
+    const articles = await runGeopoliticalPipeline();
+    res.json({ success: true, count: articles.length, data: articles });
+  } catch (error) {
+    console.error("Erreur pipeline géopolitique :", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

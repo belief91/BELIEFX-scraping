@@ -216,10 +216,19 @@ export function isValidArticle(article) {
     if (!article.source)
         return false;
 
-    if (!article.source.name)
+    // article.source peut être soit une chaîne déjà aplatie (format produit
+    // par newsapi.js -> formatArticles), soit l'objet brut NewsAPI
+    // { id, name }. On gère les deux pour ne pas casser si la structure
+    // change en amont.
+    const sourceName =
+        typeof article.source === "string"
+            ? article.source
+            : article.source.name;
+
+    if (!sourceName)
         return false;
 
-    if (!isTrustedSource(article.source.name))
+    if (!isTrustedSource(sourceName))
         return false;
 
     if (
@@ -267,9 +276,14 @@ export function filterArticles(articles = []) {
         if (categories.length === 0)
             continue;
 
+        const sourceName =
+            typeof article.source === "string"
+                ? article.source
+                : article.source.name;
+
         resultat.push({
 
-            source: article.source.name,
+            source: sourceName,
 
             title: article.title,
 
@@ -277,7 +291,7 @@ export function filterArticles(articles = []) {
 
             url: article.url,
 
-            image: article.urlToImage || "",
+            image: article.urlToImage || article.image || "",
 
             publishedAt: article.publishedAt,
 
