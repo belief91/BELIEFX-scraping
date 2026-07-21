@@ -147,6 +147,42 @@ async function scraperCalendrierBC() {
   return resultats;
 }
 
+// ---- NewsAPI — source complémentaire pour l'actualité géopolitique ----
+
+const NEWSAPI_URL = "https://newsapi.org/v2/everything";
+
+async function scraperNewsAPI() {
+  const cleApi = process.env.NEWS_API_KEY;
+  if (!cleApi) {
+    throw new Error("NEWS_API_KEY manquante dans les variables d'environnement");
+  }
+
+  const params = new URLSearchParams({
+    q: "geopolitics OR sanctions OR central bank OR war OR treaty",
+    language: "en",
+    sortBy: "publishedAt",
+    pageSize: "20",
+    apiKey: cleApi,
+  });
+
+  const response = await fetch(`${NEWSAPI_URL}?${params.toString()}`);
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Échec NewsAPI : HTTP ${response.status} — ${detail}`);
+  }
+
+  const data = await response.json();
+
+  return data.articles.map((a) => ({
+    titre: a.title,
+    source: a.source?.name || null,
+    url: a.url,
+    publieLe: a.publishedAt,
+    description: a.description,
+  }));
+}
+
 // ---- Routes ----
 
 app.get("/health", (req, res) => {
@@ -169,6 +205,16 @@ app.get("/scrape/geopolitics", verifierSecret, async (req, res) => {
     res.json({ success: true, count: articles.length, data: articles });
   } catch (error) {
     console.error("Erreur pipeline géopolitique :", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get("/scrape/geopolitics/newsapi", verifierSecret, async (req, res) => {
+  try {
+    const articles = await scraperNewsAPI();
+    res.json({ success: true, count: articles.length, data: articles });
+  } catch (error) {
+    console.error("Erreur scraping NewsAPI :", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

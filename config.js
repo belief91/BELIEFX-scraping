@@ -3,13 +3,15 @@ import dotenv from "dotenv";
 dotenv.config();
 
 /* ===========================
-   NEWS API
+   NEWS API — OBSOLÈTE (2026-07-18)
+   Remplacé par GDELT : le plan gratuit NewsAPI.org bloque officiellement
+   tout usage hors localhost (documentation officielle confirmée),
+   causant des erreurs HTTP 401 systématiques une fois déployé sur
+   Render. Conservé en commentaire pour référence, non utilisé.
 =========================== */
 
-export const NEWS_API_KEY = process.env.NEWS_API_KEY;
-
-export const NEWS_API_URL =
-  "https://newsapi.org/v2/everything";
+// export const NEWS_API_KEY = process.env.NEWS_API_KEY;
+// export const NEWS_API_URL = "https://newsapi.org/v2/everything";
 
 /* ===========================
    LANGUE
@@ -21,47 +23,51 @@ export const TARGET_LANGUAGE = "fr";
    SOURCES PRIORITAIRES
 =========================== */
 
+/* ===========================
+   SOURCES PRIORITAIRES
+   Format DOMAINE (ex: "bbc.com"), pas nom lisible — GDELT renvoie un
+   domaine brut dans son champ "domain", contrairement à NewsAPI qui
+   donnait un nom lisible ("BBC News"). Mis à jour le 2026-07-18 lors
+   du remplacement NewsAPI -> GDELT.
+=========================== */
+
 export const TRUSTED_SOURCES = [
 
-  // Agences / généralistes internationaux confirmés présents dans NewsAPI
-  "BBC News",
-  "CNN",
-  "Al Jazeera English",
-  "NPR",
-  "DW (English)",
-  "CBC News",
-  "CNA",
-  "RTE",
-  "The Irish Times",
-  "The Straits Times",
+  // Agences / généralistes internationaux
+  "bbc.com",
+  "cnn.com",
+  "aljazeera.com",
+  "npr.org",
+  "dw.com",
+  "cbc.ca",
+  "channelnewsasia.com",
+  "rte.ie",
+  "irishtimes.com",
+  "straitstimes.com",
 
   // Spécialisés géopolitique / militaire / élections
-  "Foreign Policy",
-  "The Diplomat",
-  "War on the Rocks",
-  "POLITICO.eu",
-  "Hurriyet Daily News",
+  "foreignpolicy.com",
+  "thediplomat.com",
+  "warontherocks.com",
+  "politico.eu",
+  "hurriyetdailynews.com",
 
-  // Finance / impact marché (pertinent pour BELIEFX, trading)
-  "Bloomberg",
-  "CNBC",
+  // Finance / impact marché
+  "bloomberg.com",
+  "cnbc.com",
 
-  // Conservées au cas où NewsAPI les inclut à l'avenir (absentes des 733
-  // articles testés le 2026-07-18, mais gardées sans coût — une simple
-  // comparaison de texte qui ne matchera juste rien si absentes)
-  "Reuters",
-  "Associated Press",
-  "Financial Times",
-  "The Wall Street Journal",
-  "The Economist",
-  "The Washington Post",
-  "The New York Times",
+  // Conservées au cas où présentes dans les résultats GDELT
+  "reuters.com",
+  "apnews.com",
+  "ft.com",
+  "wsj.com",
+  "economist.com",
+  "washingtonpost.com",
+  "nytimes.com",
 
-  // Médias d'État russes — inclus sur demande explicite (2026-07-18).
-  // À garder en tête : sources à biais éditorial documenté (propagande
-  // d'État), à traiter avec recul dans l'usage final de ces articles.
-  "RT",
-  "Sputnikglobe.com"
+  // Médias d'État russes — inclus sur demande explicite (2026-07-18)
+  "rt.com",
+  "sputnikglobe.com"
 
 ];
 
