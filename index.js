@@ -1,8 +1,9 @@
 /**
  * Service de scraping BELIEFX — déployé sur Render
  * ====================================================
- * Rôle : exécuter le scraping (calendrier BC, et futurs scrapers) sans les
- * limites de temps d'exécution des fonctions serverless Vercel.
+ * Rôle : exécuter le scraping (calendrier BC, communiqués de banques
+ * centrales, et futurs scrapers) sans les limites de temps d'exécution
+ * des fonctions serverless Vercel.
  *
  * Vercel garde la planification (cron, avantage plan gratuit) et appelle
  * ce service via HTTP. Ce service fait le travail lourd et renvoie du
@@ -16,9 +17,21 @@
 import express from "express";
 import * as cheerio from "cheerio";
 import { runGeopoliticalPipeline } from "./geopolitics/pipeline.js";
+import { scraperFed } from "./scrapers/scraperFed.js";
+import { scraperECB } from "./scrapers/scraperECB.js";
+import { scraperBoE } from "./scrapers/scraperBoE.js";
+import { scraperBoJ } from "./scrapers/scraperBoJ.js";
+import { scraperSNB } from "./scrapers/scraperSNB.js";
+import { scraperBoC } from "./scrapers/scraperBoC.js";
+import { scraperRBA } from "./scrapers/scraperRBA.js";
+// RBNZ volontairement absent : bloqué par WAF (HTTP 403), mis de côté.
+// Norges Bank et Riksbank : pas encore développés.
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Nécessaire pour lire req.body sur les routes POST (ex: /scrape/central-bank-statement)
+app.use(express.json());
 
 // ---- Middleware d'authentification (partagé avec Vercel) ----
 function verifierSecret(req, res, next) {
@@ -183,6 +196,18 @@ async function scraperNewsAPI() {
   }));
 }
 
+// ---- Scraping des communiqués de banques centrales (G10) ----
+
+const SCRAPERS_PAR_BANQUE = {
+  Fed: scraperFed,
+  ECB: scraperECB,
+  BoE: scraperBoE,
+  BoJ: scraperBoJ,
+  SNB: scraperSNB,
+  BoC: scraperBoC,
+  RBA: scraperRBA,
+};
+
 // ---- Routes ----
 
 app.get("/health", (req, res) => {
@@ -215,6 +240,26 @@ app.get("/scrape/geopolitics/newsapi", verifierSecret, async (req, res) => {
     res.json({ success: true, count: articles.length, data: articles });
   } catch (error) {
     console.error("Erreur scraping NewsAPI :", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/scrape/central-bank-statement", verifierSecret, async (req, res) => {
+  const { banque } = req.body;
+
+  const scraperCible = SCRAPERS_PAR_BANQUE[banque];
+  if (!scraperCible) {
+    return res.status(400).json({
+      success: false,
+      error: `Banque inconnue ou non supportée : ${banque}`,
+    });
+  }
+
+  try {
+    const texte = await scraperCible();
+    res.json({ success: true, texte });
+  } catch (error) {
+    console.error(`Erreur scraping ${banque} :`, error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
