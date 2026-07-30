@@ -1,24 +1,33 @@
 /**
  * Service de scraping BELIEFX — déployé sur Render
  * ====================================================
- * Rôle : exécuter le scraping (calendrier BC, et futurs scrapers) sans les
- * limites de temps d'exécution des fonctions serverless Vercel.
+ * Rôle : exécuter le scraping (calendrier BC, communiqués de banques
+ * centrales, et futurs scrapers) sans les limites de temps d'exécution
+ * des fonctions serverless Vercel.
  *
- * Vercel garde la planification (cron, avantage plan gratuit) et appelle
- * ce service via HTTP. Ce service fait le travail lourd et renvoie du
- * JSON ; c'est Vercel qui sauvegarde ensuite dans Back4App (les clés
- * Back4App restent uniquement côté Vercel, pas dupliquées ici).
- *
- * Sécurité : protégé par un header partagé RENDER_SCRAPER_SECRET, pour
- * qu'on ne puisse pas appeler ce service publiquement sans autorisation.
+ * Chaque scraper de banque centrale expose maintenant UNE fonction qui
+ * prend un paramètre "categorie" (statement, minutes, presseConference,
+ * discours, monetaryPolicyReport, beigeBook) et ne scrape QUE cette
+ * catégorie précise — jamais les 7 en même temps.
  */
 
 import express from "express";
 import * as cheerio from "cheerio";
 import { runGeopoliticalPipeline } from "./geopolitics/pipeline.js";
+import { scraperFed } from "./scrapers/scraperFed.js";
+import { scraperECB } from "./scrapers/scraperECB.js";
+import { scraperBoE } from "./scrapers/scraperBoE.js";
+import { scraperBoJ } from "./scrapers/scraperBoJ.js";
+import { scraperSNB } from "./scrapers/scraperSNB.js";
+import { scraperBoC } from "./scrapers/scraperBoC.js";
+import { scraperRBA } from "./scrapers/scraperRBA.js";
+// RBNZ volontairement absent : bloqué par WAF (HTTP 403), mis de côté.
+// Norges Bank et Riksbank : pas encore développés.
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+app.use(express.json());
 
 // ---- Middleware d'authentification (partagé avec Vercel) ----
 function verifierSecret(req, res, next) {
@@ -31,7 +40,7 @@ function verifierSecret(req, res, next) {
   next();
 }
 
-// ---- Logique de scraping (même méthode validée : cookies serveur TE) ----
+// ---- Logique de scraping calendrier (même méthode validée : cookies serveur TE) ----
 
 const CALENDAR_URL = "https://tradingeconomics.com/calendar";
 
@@ -183,6 +192,18 @@ async function scraperNewsAPI() {
   }));
 }
 
+// ---- Scraping des communiqués de banques centrales (G10) — 1 catégorie à la fois ----
+
+const SCRAPERS_PAR_BANQUE = {
+  Fed: scraperFed,
+  ECB: scraperECB,
+  BoE: scraperBoE,
+  BoJ: scraperBoJ,
+  SNB: scraperSNB,
+  BoC: scraperBoC,
+  RBA: scraperRBA,
+};
+
 // ---- Routes ----
 
 app.get("/health", (req, res) => {
@@ -215,6 +236,38 @@ app.get("/scrape/geopolitics/newsapi", verifierSecret, async (req, res) => {
     res.json({ success: true, count: articles.length, data: articles });
   } catch (error) {
     console.error("Erreur scraping NewsAPI :", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /scrape/central-bank-statement
+ * Body attendu : { banque: "Fed", categorie: "statement" }
+ * Ne scrape QUE cette catégorie précise pour cette banque précise.
+ */
+app.post("/scrape/central-bank-statement", verifierSecret, async (req, res) => {
+  const { banque, categorie } = req.body;
+
+  const scraperCible = SCRAPERS_PAR_BANQUE[banque];
+  if (!scraperCible) {
+    return res.status(400).json({
+      success: false,
+      error: `Banque inconnue ou non supportée : ${banque}`,
+    });
+  }
+
+  if (!categorie) {
+    return res.status(400).json({
+      success: false,
+      error: "Paramètre 'categorie' manquant",
+    });
+  }
+
+  try {
+    const texte = await scraperCible(categorie);
+    res.json({ success: true, texte });
+  } catch (error) {
+    console.error(`Erreur scraping ${banque}/${categorie} :`, error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
