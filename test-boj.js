@@ -1,28 +1,23 @@
 import { scraperBoJ } from "./scrapers/scraperBoJ.js";
 
+const CATEGORIES = [
+  "statement",
+  "minutes",
+  "presseConference",
+  "discours",
+  "monetaryPolicyReport",
+  "beigeBook",
+];
+
 (async () => {
-  try {
-    console.log("Lancement du scraper BoJ...");
-    const texte = await scraperBoJ();
-
-    const marqueurs = [
-      "--- STATEMENT ON MONETARY POLICY ---",
-      "--- MINUTES ---",
-      "--- SUMMARY OF OPINIONS ---",
-      "--- OUTLOOK REPORT ---",
-      "--- CONFÉRENCE DE PRESSE (traduit JA→EN) ---",
-      "--- DISCOURS ---",
-    ];
-
-    console.log("--- Vérification des sections ---");
-    marqueurs.forEach((m) => {
-      console.log(`${texte.includes(m) ? "✅" : "❌"} ${m}`);
-    });
-
-    console.log("Longueur totale :", texte.length, "caractères");
-    console.log("--- Aperçu (500 premiers caractères) ---");
-    console.log(texte.slice(0, 500));
-  } catch (error) {
-    console.error("Erreur :", error.message);
+  for (const categorie of CATEGORIES) {
+    try {
+      console.log(`\n=== Test catégorie : ${categorie} ===`);
+      const texte = await scraperBoJ(categorie);
+      console.log(`✅ OK — ${texte.length} caractères`);
+      console.log(texte.slice(0, 200));
+    } catch (error) {
+      console.log(`❌ Erreur : ${error.message}`);
+    }
   }
 })();

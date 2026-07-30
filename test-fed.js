@@ -1,26 +1,23 @@
 import { scraperFed } from "./scrapers/scraperFed.js";
 
+const CATEGORIES = [
+  "statement",
+  "minutes",
+  "presseConference",
+  "discours",
+  "monetaryPolicyReport",
+  "beigeBook",
+];
+
 (async () => {
-  try {
-    console.log("Lancement du scraper Fed...");
-    const texte = await scraperFed();
-
-    const marqueurs = [
-      "--- FOMC STATEMENT ---",
-      "--- MINUTES FOMC ---",
-      "--- CONFÉRENCE DE PRESSE (PDF) ---",
-      "--- DISCOURS ---",
-      "--- MONETARY POLICY REPORT ---",
-      "--- BEIGE BOOK ---",
-    ];
-
-    console.log("--- Vérification des 6 sections (7 catégories, 1-2 fusionnées) ---");
-    marqueurs.forEach((m) => {
-      console.log(`${texte.includes(m) ? "✅" : "❌"} ${m}`);
-    });
-
-    console.log("Longueur totale :", texte.length, "caractères");
-  } catch (error) {
-    console.error("Erreur :", error.message);
+  for (const categorie of CATEGORIES) {
+    try {
+      console.log(`\n=== Test catégorie : ${categorie} ===`);
+      const texte = await scraperFed(categorie);
+      console.log(`✅ OK — ${texte.length} caractères`);
+      console.log(texte.slice(0, 200));
+    } catch (error) {
+      console.log(`❌ Erreur : ${error.message}`);
+    }
   }
 })();

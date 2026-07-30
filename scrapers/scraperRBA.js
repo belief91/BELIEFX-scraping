@@ -1,20 +1,20 @@
 // scrapers/scraperRBA.js
-// Agrège les catégories pour la RBA :
-// - 1-2-3 : Décision + Minutes, via scraping direct de la page de listing
-//   /media-releases/ (le flux RSS media-releases est trop étroit, ne
-//   contenait que 2 items au moment du diagnostic — non fiable pour
-//   retrouver la décision de politique monétaire)
-// - 5 : Speeches (flux RSS dédié, fiable)
-// - 6 : Statement on Monetary Policy (flux RSS dédié, fiable)
-// - 7 : Financial Stability Review (flux RSS dédié, fiable)
-// Catégorie 4 (conférence de presse) : non applicable — RBA fait partie
-// des exceptions confirmées par le référentiel.
+// NOUVEAU MODÈLE : une fonction par catégorie, appelée UNE SEULE À LA FOIS.
 //
-// Le site RBA protège ses pages/flux par un WAF — un User-Agent de
+// Mapping des catégories génériques vers la réalité RBA :
+// - statement : Media Release décision (page de listing HTML, filtrée par titre)
+// - minutes : Media Release "minutes" (même listing, titre différent)
+// - discours : discours le plus récent (flux dédié /rss/rss-cb-speeches.xml)
+// - monetaryPolicyReport : Statement on Monetary Policy (flux dédié /rss-cb-smp.xml)
+// - beigeBook : Financial Stability Review (flux dédié /rss-cb-fsr.xml)
+// - presseConference : NON APPLICABLE — RBA fait partie des exceptions
+//   confirmées par le référentiel (pas de conférence de presse systématique)
+//
+// Le site RBA protège ses flux RSS par un WAF — un User-Agent de
 // navigateur est nécessaire pour éviter d'être bloqué.
 
 import * as cheerio from "cheerio";
-import { fetchAvecRetry, pause } from "./fetchUtils.js";
+import { fetchAvecRetry } from "./fetchUtils.js";
 
 const HEADERS_NAVIGATEUR = {
   "User-Agent":
@@ -45,16 +45,12 @@ async function lireItemsRSS(url) {
   return items;
 }
 
-/**
- * Scrape la page de listing complète des Media Releases (plus fiable
- * que le flux RSS, trop étroit — 2 items seulement au moment du
- * diagnostic). Retourne tous les liens avec leur texte, ordre :
- * plus récent en premier (confirmé par diagnostic).
- */
-async function lireListingMediaReleases(url) {
-  const response = await fetchAvecRetry(url, { headers: HEADERS_NAVIGATEUR });
+async function lireListingMediaReleases() {
+  const response = await fetchAvecRetry(RBA_MEDIA_RELEASES_LISTING, {
+    headers: HEADERS_NAVIGATEUR,
+  });
   if (!response.ok) {
-    throw new Error(`Échec lecture listing RBA (${url}) : HTTP ${response.status}`);
+    throw new Error(`Échec lecture listing RBA : HTTP ${response.status}`);
   }
   const html = await response.text();
   const $ = cheerio.load(html);
@@ -73,7 +69,7 @@ async function lireListingMediaReleases(url) {
   return items;
 }
 
-async function scraperPage(url, selecteur = "#content p") {
+async function scraperPage(url) {
   const response = await fetchAvecRetry(url, { headers: HEADERS_NAVIGATEUR });
   if (!response.ok) {
     throw new Error(`Échec scraping page RBA (${url}) : HTTP ${response.status}`);
@@ -82,125 +78,74 @@ async function scraperPage(url, selecteur = "#content p") {
   const $ = cheerio.load(html);
 
   const paragraphes = [];
-  $(selecteur).each((_, el) => {
+  $("#content p").each((_, el) => {
     const texte = $(el).text().trim();
     if (texte.length > 0) paragraphes.push(texte);
   });
   return paragraphes.join("\n\n");
 }
 
-async function traiterCategorie(nomCategorie, items, trouverItem, morceaux, erreurs) {
-  const item = trouverItem(items);
-  if (!item) {
-    erreurs.push(`${nomCategorie} : aucun item trouvé`);
-    return;
-  }
-  try {
-    const texte = await scraperPage(item.lien);
-    if (texte) {
-      morceaux.push(`--- ${nomCategorie} ---\n${texte}`);
-    } else {
-      erreurs.push(`${nomCategorie} : 0 paragraphe extrait de ${item.lien}`);
-    }
-  } catch (err) {
-    erreurs.push(`${nomCategorie} : ${err.message}`);
-  }
+// ─────────────────────────────────────────────────────────────
+// Une fonction par catégorie
+// ─────────────────────────────────────────────────────────────
+
+async function scraperStatement() {
+  const items = await lireListingMediaReleases();
+  const decision = items.find((it) =>
+    ["monetary policy decision", "reserve bank board", "cash rate"].some((mot) =>
+      it.titre.toLowerCase().includes(mot)
+    )
+  );
+  if (!decision) throw new Error("Media Release (décision) : aucun item trouvé");
+  return await scraperPage(decision.lien);
 }
 
-export async function scraperRBA() {
-  const morceaux = [];
-  const erreurs = [];
+async function scraperMinutes() {
+  const items = await lireListingMediaReleases();
+  const minutes = items.find((it) => it.titre.toLowerCase().includes("minutes"));
+  if (!minutes) throw new Error("Minutes : aucun item trouvé");
+  return await scraperPage(minutes.lien);
+}
 
-  let itemsListing = [];
-  let itemsSpeeches = [];
-  let itemsSMP = [];
-  let itemsFSR = [];
+async function scraperDiscours() {
+  const items = await lireItemsRSS(RBA_SPEECHES_RSS);
+  if (items.length === 0) throw new Error("Discours : aucun item dans le flux");
+  return await scraperPage(items[0].lien);
+}
 
-  try {
-    itemsListing = await lireListingMediaReleases(RBA_MEDIA_RELEASES_LISTING);
-  } catch (err) {
-    erreurs.push(`Listing Media Releases : ${err.message}`);
+async function scraperMonetaryPolicyReport() {
+  const items = await lireItemsRSS(RBA_SMP_RSS);
+  if (items.length === 0) throw new Error("Statement on Monetary Policy : aucun item dans le flux");
+  return await scraperPage(items[0].lien);
+}
+
+async function scraperBeigeBook() {
+  const items = await lireItemsRSS(RBA_FSR_RSS);
+  if (items.length === 0) throw new Error("Financial Stability Review : aucun item dans le flux");
+  return await scraperPage(items[0].lien);
+}
+
+async function scraperPresseConference() {
+  throw new Error("Catégorie non applicable pour la RBA (pas de conférence de presse systématique)");
+}
+
+// ─────────────────────────────────────────────────────────────
+// Routeur — n'exécute QUE la catégorie demandée
+// ─────────────────────────────────────────────────────────────
+
+const CATEGORIES = {
+  statement: scraperStatement,
+  minutes: scraperMinutes,
+  discours: scraperDiscours,
+  monetaryPolicyReport: scraperMonetaryPolicyReport,
+  beigeBook: scraperBeigeBook,
+  presseConference: scraperPresseConference,
+};
+
+export async function scraperRBA(categorie) {
+  const fonction = CATEGORIES[categorie];
+  if (!fonction) {
+    throw new Error(`Catégorie inconnue pour RBA : "${categorie}"`);
   }
-
-  await pause();
-  try {
-    itemsSpeeches = await lireItemsRSS(RBA_SPEECHES_RSS);
-  } catch (err) {
-    erreurs.push(`Flux speeches : ${err.message}`);
-  }
-
-  await pause();
-  try {
-    itemsSMP = await lireItemsRSS(RBA_SMP_RSS);
-  } catch (err) {
-    erreurs.push(`Flux smp : ${err.message}`);
-  }
-
-  await pause();
-  try {
-    itemsFSR = await lireItemsRSS(RBA_FSR_RSS);
-  } catch (err) {
-    erreurs.push(`Flux fsr : ${err.message}`);
-  }
-
-  // Catégories 1-2 : Décision (titre exact confirmé par diagnostic)
-  await pause();
-  await traiterCategorie(
-    "MEDIA RELEASE (DÉCISION)",
-    itemsListing,
-    (items) => items.find((it) => it.titre.toLowerCase().includes("monetary policy decision")),
-    morceaux,
-    erreurs
-  );
-
-  // Catégorie 3 : Minutes (recherché dans le même listing)
-  await pause();
-  await traiterCategorie(
-    "MINUTES",
-    itemsListing,
-    (items) => items.find((it) => it.titre.toLowerCase().includes("minutes")),
-    morceaux,
-    erreurs
-  );
-
-  // Catégorie 5 : Discours le plus récent
-  await pause();
-  await traiterCategorie(
-    "DISCOURS",
-    itemsSpeeches,
-    (items) => items[0],
-    morceaux,
-    erreurs
-  );
-
-  // Catégorie 6 : Statement on Monetary Policy
-  await pause();
-  await traiterCategorie(
-    "STATEMENT ON MONETARY POLICY",
-    itemsSMP,
-    (items) => items[0],
-    morceaux,
-    erreurs
-  );
-
-  // Catégorie 7 : Financial Stability Review
-  await pause();
-  await traiterCategorie(
-    "FINANCIAL STABILITY REVIEW",
-    itemsFSR,
-    (items) => items[0],
-    morceaux,
-    erreurs
-  );
-
-  if (erreurs.length > 0) {
-    console.warn("--- Catégories non récupérées pour RBA ---");
-    erreurs.forEach((e) => console.warn("  -", e));
-  }
-
-  if (morceaux.length === 0) {
-    throw new Error("Aucun document pertinent trouvé pour RBA (toutes catégories en échec)");
-  }
-
-  return morceaux.join("\n\n");
+  return await fonction();
 }

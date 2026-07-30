@@ -1,28 +1,16 @@
 import { scraperBoC } from "./scrapers/scraperBoC.js";
 
+const CATEGORIES = ["statement", "presseConference", "minutes", "discours", "monetaryPolicyReport", "beigeBook"];
+
 (async () => {
-  try {
-    console.log("Lancement du scraper BoC...");
-    const texte = await scraperBoC();
-
-    const marqueurs = [
-      "--- RATE STATEMENT ---",
-      "--- CONFÉRENCE DE PRESSE (OPENING STATEMENT) ---",
-      "--- DISCOURS ---",
-      "--- MONETARY POLICY REPORT ---",
-      "--- SUMMARY OF DELIBERATIONS ---",
-      "--- BUSINESS OUTLOOK SURVEY ---",
-    ];
-
-    console.log("--- Vérification des sections ---");
-    marqueurs.forEach((m) => {
-      console.log(`${texte.includes(m) ? "✅" : "❌"} ${m}`);
-    });
-
-    console.log("Longueur totale :", texte.length, "caractères");
-    console.log("--- Aperçu (500 premiers caractères) ---");
-    console.log(texte.slice(0, 500));
-  } catch (error) {
-    console.error("Erreur :", error.message);
+  for (const categorie of CATEGORIES) {
+    try {
+      console.log(`\n=== Test catégorie : ${categorie} ===`);
+      const texte = await scraperBoC(categorie);
+      console.log(`✅ OK — ${texte.length} caractères`);
+      console.log(texte.slice(0, 200));
+    } catch (error) {
+      console.log(`❌ Erreur : ${error.message}`);
+    }
   }
 })();

@@ -1,13 +1,23 @@
 import { scraperBoE } from "./scrapers/scraperBoE.js";
 
+const CATEGORIES = [
+  "statement",
+  "minutes",
+  "discours",
+  "presseConference",
+  "monetaryPolicyReport",
+  "beigeBook",
+];
+
 (async () => {
-  try {
-    console.log("Lancement du scraper BoE...");
-    const texte = await scraperBoE();
-    console.log("--- RÉSULTAT ---");
-    console.log(texte.slice(0, 1500));
-    console.log("--- FIN (longueur totale:", texte.length, "caractères) ---");
-  } catch (error) {
-    console.error("Erreur :", error.message);
+  for (const categorie of CATEGORIES) {
+    try {
+      console.log(`\n=== Test catégorie : ${categorie} ===`);
+      const texte = await scraperBoE(categorie);
+      console.log(`✅ OK — ${texte.length} caractères`);
+      console.log(texte.slice(0, 200));
+    } catch (error) {
+      console.log(`❌ Erreur : ${error.message}`);
+    }
   }
 })();
