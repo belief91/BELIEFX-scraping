@@ -1,33 +1,25 @@
 /**
  * Service de scraping BELIEFX — déployé sur Render
  * ====================================================
- * Rôle : exécuter le scraping (calendrier BC, communiqués de banques
- * centrales, et futurs scrapers) sans les limites de temps d'exécution
- * des fonctions serverless Vercel.
+ * Rôle : exécuter le scraping (calendrier BC, et futurs scrapers) sans les
+ * limites de temps d'exécution des fonctions serverless Vercel.
  *
- * Chaque scraper de banque centrale expose maintenant UNE fonction qui
- * prend un paramètre "categorie" (statement, minutes, presseConference,
- * discours, monetaryPolicyReport, beigeBook) et ne scrape QUE cette
- * catégorie précise — jamais les 7 en même temps.
+ * Vercel garde la planification (cron, avantage plan gratuit) et appelle
+ * ce service via HTTP. Ce service fait le travail lourd et renvoie du
+ * JSON ; c'est Vercel qui sauvegarde ensuite dans Back4App (les clés
+ * Back4App restent uniquement côté Vercel, pas dupliquées ici).
+ *
+ * Sécurité : protégé par un header partagé RENDER_SCRAPER_SECRET, pour
+ * qu'on ne puisse pas appeler ce service publiquement sans autorisation.
  */
 
+import "dotenv/config";
 import express from "express";
 import * as cheerio from "cheerio";
 import { runGeopoliticalPipeline } from "./geopolitics/pipeline.js";
-import { scraperFed } from "./scrapers/scraperFed.js";
-import { scraperECB } from "./scrapers/scraperECB.js";
-import { scraperBoE } from "./scrapers/scraperBoE.js";
-import { scraperBoJ } from "./scrapers/scraperBoJ.js";
-import { scraperSNB } from "./scrapers/scraperSNB.js";
-import { scraperBoC } from "./scrapers/scraperBoC.js";
-import { scraperRBA } from "./scrapers/scraperRBA.js";
-// RBNZ volontairement absent : bloqué par WAF (HTTP 403), mis de côté.
-// Norges Bank et Riksbank : pas encore développés.
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-
-app.use(express.json());
 
 // ---- Middleware d'authentification (partagé avec Vercel) ----
 function verifierSecret(req, res, next) {
@@ -40,7 +32,7 @@ function verifierSecret(req, res, next) {
   next();
 }
 
-// ---- Logique de scraping calendrier (même méthode validée : cookies serveur TE) ----
+// ---- Logique de scraping (même méthode validée : cookies serveur TE) ----
 
 const CALENDAR_URL = "https://tradingeconomics.com/calendar";
 
@@ -156,53 +148,56 @@ async function scraperCalendrierBC() {
   return resultats;
 }
 
-// ---- NewsAPI — source complémentaire pour l'actualité géopolitique ----
+// ---- TV5MONDE — scraping de la rubrique "International" (SSR, Drupal) ----
 
-const NEWSAPI_URL = "https://newsapi.org/v2/everything";
+const TV5_BASE_URL = "https://information.tv5monde.com";
+const TV5_INTERNATIONAL_URL = `${TV5_BASE_URL}/international`;
 
-async function scraperNewsAPI() {
-  const cleApi = process.env.NEWS_API_KEY;
-  if (!cleApi) {
-    throw new Error("NEWS_API_KEY manquante dans les variables d'environnement");
-  }
-
-  const params = new URLSearchParams({
-    q: "geopolitics OR sanctions OR central bank OR war OR treaty",
-    language: "en",
-    sortBy: "publishedAt",
-    pageSize: "20",
-    apiKey: cleApi,
-  });
-
-  const response = await fetch(`${NEWSAPI_URL}?${params.toString()}`);
+async function scraperTV5Monde() {
+  const response = await fetch(TV5_INTERNATIONAL_URL, { headers: HEADERS });
 
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Échec NewsAPI : HTTP ${response.status} — ${detail}`);
+    throw new Error(`Échec du scraping TV5MONDE : HTTP ${response.status}`);
   }
 
-  const data = await response.json();
+  const html = await response.text();
+  const $ = cheerio.load(html);
 
-  return data.articles.map((a) => ({
-    titre: a.title,
-    source: a.source?.name || null,
-    url: a.url,
-    publieLe: a.publishedAt,
-    description: a.description,
-  }));
+  const resultats = [];
+
+  $(".views-row").each((_, row) => {
+    // Les blocs vidéo en tête de page n'ont pas de résumé : on les ignore.
+    const resumeEl = $(row).find(".views-field-field-resume").first();
+    if (!resumeEl.length) return;
+
+    const lienEl = $(row).find("a").first();
+    const hrefRelatif = (lienEl.attr("href") || "").trim();
+    if (!hrefRelatif) return;
+    const url = hrefRelatif.startsWith("http") ? hrefRelatif : `${TV5_BASE_URL}${hrefRelatif}`;
+
+    const titre = $(row)
+      .find(".views-field-title .field--name-title")
+      .first()
+      .text()
+      .trim();
+    if (!titre) return;
+
+    const description = resumeEl.text().replace(/\s+/g, " ").trim();
+    const publieLe = $(row).find(".views-field-created time").first().attr("datetime") || null;
+    const categorie = $(row).find(".views-field-field-surtitre-manuel").first().text().trim();
+
+    resultats.push({
+      titre,
+      source: "TV5MONDE",
+      url,
+      publieLe,
+      description,
+      categorie,
+    });
+  });
+
+  return resultats;
 }
-
-// ---- Scraping des communiqués de banques centrales (G10) — 1 catégorie à la fois ----
-
-const SCRAPERS_PAR_BANQUE = {
-  Fed: scraperFed,
-  ECB: scraperECB,
-  BoE: scraperBoE,
-  BoJ: scraperBoJ,
-  SNB: scraperSNB,
-  BoC: scraperBoC,
-  RBA: scraperRBA,
-};
 
 // ---- Routes ----
 
@@ -230,44 +225,12 @@ app.get("/scrape/geopolitics", verifierSecret, async (req, res) => {
   }
 });
 
-app.get("/scrape/geopolitics/newsapi", verifierSecret, async (req, res) => {
+app.get("/scrape/geopolitics/tv5monde", verifierSecret, async (req, res) => {
   try {
-    const articles = await scraperNewsAPI();
+    const articles = await scraperTV5Monde();
     res.json({ success: true, count: articles.length, data: articles });
   } catch (error) {
-    console.error("Erreur scraping NewsAPI :", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-/**
- * POST /scrape/central-bank-statement
- * Body attendu : { banque: "Fed", categorie: "statement" }
- * Ne scrape QUE cette catégorie précise pour cette banque précise.
- */
-app.post("/scrape/central-bank-statement", verifierSecret, async (req, res) => {
-  const { banque, categorie } = req.body;
-
-  const scraperCible = SCRAPERS_PAR_BANQUE[banque];
-  if (!scraperCible) {
-    return res.status(400).json({
-      success: false,
-      error: `Banque inconnue ou non supportée : ${banque}`,
-    });
-  }
-
-  if (!categorie) {
-    return res.status(400).json({
-      success: false,
-      error: "Paramètre 'categorie' manquant",
-    });
-  }
-
-  try {
-    const texte = await scraperCible(categorie);
-    res.json({ success: true, texte });
-  } catch (error) {
-    console.error(`Erreur scraping ${banque}/${categorie} :`, error);
+    console.error("Erreur scraping TV5MONDE :", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
