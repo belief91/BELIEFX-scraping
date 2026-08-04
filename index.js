@@ -183,7 +183,10 @@ async function scraperTV5Monde() {
   const response = await fetch(TV5_RSS_URL, { headers: HEADERS });
 
   if (!response.ok) {
-    throw new Error(`Échec du scraping TV5MONDE (RSS) : HTTP ${response.status}`);
+    const corpsErreur = await response.text();
+    throw new Error(
+      `Échec du scraping TV5MONDE (RSS) : HTTP ${response.status} — ${corpsErreur.slice(0, 300)}`
+    );
   }
 
   const xml = await response.text();
