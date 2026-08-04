@@ -152,56 +152,66 @@ async function scraperCalendrierBC() {
   return resultats;
 }
 
-// ---- TV5MONDE — scraping de la rubrique "International" (SSR, Drupal) ----
+// ---- TV5MONDE — flux RSS officiel de la rubrique "International" ----
+// (le scraping HTML direct est bloqué en HTTP 403 depuis l'IP datacenter
+// de Render ; le flux RSS, lui, répond 200 et n'est pas filtré)
 
-const TV5_BASE_URL = "https://information.tv5monde.com";
-const TV5_INTERNATIONAL_URL = `${TV5_BASE_URL}/international`;
+const TV5_RSS_URL = "https://information.tv5monde.com/rsstaxo/354";
 
-async function scraperTV5Monde() {
-  const response = await fetch(TV5_INTERNATIONAL_URL, { headers: HEADERS });
+/**
+ * Extrait le "chapo" (résumé éditorial) depuis le HTML complet de l'article
+ * fourni par le flux RSS. Le chapo est le premier paragraphe en gras
+ * (<strong><p>...</p></strong>) juste après l'image d'illustration.
+ * Si absent, on retombe sur le premier <p> non vide.
+ */
+function extraireResume(descriptionHtml) {
+  const $desc = cheerio.load(descriptionHtml);
 
-  if (!response.ok) {
-    throw new Error(`Échec du scraping TV5MONDE : HTTP ${response.status}`);
+  let resume = $desc("strong p").first().text().trim();
+  if (!resume) {
+    resume = $desc("p").first().text().trim();
   }
 
-  const html = await response.text();
-  const $ = cheerio.load(html);
+  if (resume.length > 400) {
+    resume = resume.slice(0, 400).trim() + "…";
+  }
+
+  return resume;
+}
+
+async function scraperTV5Monde() {
+  const response = await fetch(TV5_RSS_URL, { headers: HEADERS });
+
+  if (!response.ok) {
+    throw new Error(`Échec du scraping TV5MONDE (RSS) : HTTP ${response.status}`);
+  }
+
+  const xml = await response.text();
+  const $ = cheerio.load(xml, { xmlMode: true });
 
   const resultats = [];
 
-  $(".views-row").each((_, row) => {
-    // Les blocs vidéo en tête de page n'ont pas de résumé : on les ignore.
-    const resumeEl = $(row).find(".views-field-field-resume").first();
-    if (!resumeEl.length) return;
+  $("item").each((_, item) => {
+    const titre = $(item).find("title").first().text().trim();
+    const url = $(item).find("link").first().text().trim();
+    const publieLe = $(item).find("pubDate").first().text().trim() || null;
+    const descriptionHtml = $(item).find("description").first().text();
 
-    const lienEl = $(row).find("a").first();
-    const hrefRelatif = (lienEl.attr("href") || "").trim();
-    if (!hrefRelatif) return;
-    const url = hrefRelatif.startsWith("http") ? hrefRelatif : `${TV5_BASE_URL}${hrefRelatif}`;
-
-    const titre = $(row)
-      .find(".views-field-title .field--name-title")
-      .first()
-      .text()
-      .trim();
-    if (!titre) return;
-
-    const description = resumeEl.text().replace(/\s+/g, " ").trim();
-    const publieLe = $(row).find(".views-field-created time").first().attr("datetime") || null;
-    const categorie = $(row).find(".views-field-field-surtitre-manuel").first().text().trim();
+    if (!titre || !url) return;
 
     resultats.push({
       titre,
       source: "TV5MONDE",
       url,
       publieLe,
-      description,
-      categorie,
+      description: extraireResume(descriptionHtml),
+      categorie: "International",
     });
   });
 
   return resultats;
 }
+
 
 // ---- Routes ----
 
