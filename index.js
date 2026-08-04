@@ -159,20 +159,36 @@ async function scraperCalendrierBC() {
 const TV5_RSS_URL = "https://information.tv5monde.com/rsstaxo/354";
 
 /**
+ * Détecte une ligne de crédit/byline (ex: "Par AFP © 2026 AFP") plutôt
+ * qu'un vrai résumé éditorial.
+ */
+function estLigneAuteur(texte) {
+  return /^Par\s/i.test(texte) && texte.length < 80;
+}
+
+/**
  * Extrait le "chapo" (résumé éditorial) depuis le HTML complet de l'article
  * fourni par le flux RSS. Le chapo est le premier paragraphe en gras
  * (<strong><p>...</p></strong>) juste après l'image d'illustration.
- * Si absent, on retombe sur le premier <p> non vide.
+ *
+ * Si absent (dépêches AFP courtes), on cherche le premier <p> qui n'est
+ * pas une simple ligne de crédit ("Par AFP © 2026 AFP"). Si aucun
+ * paragraphe exploitable n'existe, retourne null — l'article sera alors
+ * filtré (pas de résumé = pas de valeur informationnelle).
  */
 function extraireResume(descriptionHtml) {
   const $desc = cheerio.load(descriptionHtml);
 
   let resume = $desc("strong p").first().text().trim();
-  if (!resume) {
-    resume = $desc("p").first().text().trim();
+
+  if (!resume || estLigneAuteur(resume)) {
+    const paragraphes = $desc("p")
+      .map((_, el) => $desc(el).text().trim())
+      .get();
+    resume = paragraphes.find((p) => p && !estLigneAuteur(p)) || null;
   }
 
-  if (resume.length > 400) {
+  if (resume && resume.length > 400) {
     resume = resume.slice(0, 400).trim() + "…";
   }
 
@@ -183,10 +199,7 @@ async function scraperTV5Monde() {
   const response = await fetch(TV5_RSS_URL, { headers: HEADERS });
 
   if (!response.ok) {
-    const corpsErreur = await response.text();
-    throw new Error(
-      `Échec du scraping TV5MONDE (RSS) : HTTP ${response.status} — ${corpsErreur.slice(0, 300)}`
-    );
+    throw new Error(`Échec du scraping TV5MONDE (RSS) : HTTP ${response.status}`);
   }
 
   const xml = await response.text();
@@ -202,12 +215,15 @@ async function scraperTV5Monde() {
 
     if (!titre || !url) return;
 
+    const resume = extraireResume(descriptionHtml);
+    if (!resume) return; // pas de résumé exploitable : article exclu
+
     resultats.push({
       titre,
       source: "TV5MONDE",
       url,
       publieLe,
-      description: extraireResume(descriptionHtml),
+      description: resume,
       categorie: "International",
     });
   });
