@@ -1,9 +1,11 @@
 // scrapers/scraperFed.js
-// NOUVEAU MODÈLE : une fonction par catégorie, appelée UNE SEULE À LA FOIS
-// selon la catégorie détectée dans le calendrier économique (voir
-// EVENT_TO_CATEGORY dans lib/central-bank-keywords.js). Plus de scraping
-// simultané des 7 catégories — on ne récupère que celle qui correspond
-// exactement à l'événement du jour.
+// FIX : scraperMinutes() récupérait le communiqué ANNONÇANT la
+// publication des minutes (692 caractères, confirmé par test réel), pas
+// les minutes elles-mêmes. Le communiqué contient un lien "HTML" vers le
+// vrai document ("Minutes of Federal Open Market Committee ... : HTML |
+// PDF") — on le suit désormais. Garde-fou ajouté : si le contenu final
+// reste trop court (< 1000 caractères), erreur explicite plutôt que
+// retour silencieux d'un texte quasi vide.
 
 import * as cheerio from "cheerio";
 import { createRequire } from "module";
@@ -90,9 +92,38 @@ async function trouverDernierLien(urlPageDefault, motCleHref) {
   return lien;
 }
 
+/**
+ * FIX : trouve le vrai lien du document minutes depuis la page d'annonce
+ * (RSS pointe vers cette annonce, pas vers le document lui-même). On
+ * cherche un lien dont le texte est "HTML" et dont l'href contient
+ * "fomcminutes" — pattern observé sur la page d'annonce réelle.
+ */
+async function trouverLienMinutesReel(urlAnnonce) {
+  const response = await fetchAvecRetry(urlAnnonce);
+  if (!response.ok) {
+    throw new Error(`Échec lecture page annonce minutes (${urlAnnonce}) : HTTP ${response.status}`);
+  }
+  const html = await response.text();
+  const $ = cheerio.load(html);
+
+  let lien = null;
+  $("a").each((_, el) => {
+    if (lien) return;
+    const texte = $(el).text().trim().toUpperCase();
+    const href = $(el).attr("href") || "";
+    if (texte === "HTML" && href.toLowerCase().includes("fomcminutes")) {
+      lien = href.startsWith("http") ? href : `https://www.federalreserve.gov${href}`;
+    }
+  });
+
+  if (!lien) {
+    throw new Error(`Lien HTML des minutes introuvable sur la page d'annonce : ${urlAnnonce}`);
+  }
+  return lien;
+}
+
 // ─────────────────────────────────────────────────────────────
-// Une fonction par catégorie — chacune est indépendante et ne fait
-// AUCUN appel réseau vers les autres catégories.
+// Une fonction par catégorie
 // ─────────────────────────────────────────────────────────────
 
 async function scraperStatement() {
@@ -108,7 +139,19 @@ async function scraperMinutes() {
     it.titre.toLowerCase().includes("minutes of the federal open market committee")
   );
   if (!minutes) throw new Error("Minutes FOMC : aucun item trouvé dans le flux");
-  return await scraperPage(minutes.lien);
+
+  // FIX : suit le vrai lien vers le document, au lieu de scraper
+  // directement la page d'annonce (692 caractères, confirmé insuffisant)
+  const lienReel = await trouverLienMinutesReel(minutes.lien);
+  const texte = await scraperPage(lienReel);
+
+  if (texte.length < 1000) {
+    throw new Error(
+      `Minutes FOMC : contenu récupéré trop court (${texte.length} caractères) sur ${lienReel} — le sélecteur CSS "#article p" ne correspond probablement pas à cette page, à vérifier manuellement.`
+    );
+  }
+
+  return texte;
 }
 
 async function scraperPresseConference() {
@@ -141,7 +184,7 @@ async function scraperBeigeBook() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Routeur — n'exécute QUE la catégorie demandée
+// Routeur
 // ─────────────────────────────────────────────────────────────
 
 const CATEGORIES = {
