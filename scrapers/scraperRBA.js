@@ -1,17 +1,9 @@
 // scrapers/scraperRBA.js
-// NOUVEAU MODÈLE : une fonction par catégorie, appelée UNE SEULE À LA FOIS.
 //
-// Mapping des catégories génériques vers la réalité RBA :
-// - statement : Media Release décision (page de listing HTML, filtrée par titre)
-// - minutes : Media Release "minutes" (même listing, titre différent)
-// - discours : discours le plus récent (flux dédié /rss/rss-cb-speeches.xml)
-// - monetaryPolicyReport : Statement on Monetary Policy (flux dédié /rss-cb-smp.xml)
-// - beigeBook : Financial Stability Review (flux dédié /rss-cb-fsr.xml)
-// - presseConference : NON APPLICABLE — RBA fait partie des exceptions
-//   confirmées par le référentiel (pas de conférence de presse systématique)
-//
-// Le site RBA protège ses flux RSS par un WAF — un User-Agent de
-// navigateur est nécessaire pour éviter d'être bloqué.
+// FIX (scraperMinutes) : cherchait "minutes" sur le listing
+// /media-releases/, alors que les minutes RBA vivent sur une page
+// dediee /monetary-policy/rba-board-minutes/{annee}/ (confirme par
+// recherche web sur plusieurs vraies pages reelles).
 
 import * as cheerio from "cheerio";
 import { fetchAvecRetry } from "./fetchUtils.js";
@@ -30,7 +22,7 @@ const RBA_FSR_RSS = "https://www.rba.gov.au/rss/rss-cb-fsr.xml";
 async function lireItemsRSS(url) {
   const response = await fetchAvecRetry(url, { headers: HEADERS_NAVIGATEUR });
   if (!response.ok) {
-    throw new Error(`Échec lecture flux RSS RBA (${url}) : HTTP ${response.status}`);
+    throw new Error(`Echec lecture flux RSS RBA (${url}) : HTTP ${response.status}`);
   }
   const xml = await response.text();
   const $ = cheerio.load(xml, { xmlMode: true });
@@ -50,7 +42,7 @@ async function lireListingMediaReleases() {
     headers: HEADERS_NAVIGATEUR,
   });
   if (!response.ok) {
-    throw new Error(`Échec lecture listing RBA : HTTP ${response.status}`);
+    throw new Error(`Echec lecture listing RBA : HTTP ${response.status}`);
   }
   const html = await response.text();
   const $ = cheerio.load(html);
@@ -69,10 +61,44 @@ async function lireListingMediaReleases() {
   return items;
 }
 
+async function trouverDernierLienMinutes() {
+  const anneeCourante = new Date().getUTCFullYear();
+
+  for (const annee of [anneeCourante, anneeCourante - 1]) {
+    const urlIndex = `https://www.rba.gov.au/monetary-policy/rba-board-minutes/${annee}/`;
+
+    let response;
+    try {
+      response = await fetchAvecRetry(urlIndex, { headers: HEADERS_NAVIGATEUR });
+    } catch {
+      continue;
+    }
+    if (!response.ok) continue;
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
+
+    let dernierLien = null;
+    $("a").each((_, el) => {
+      if (dernierLien) return;
+      const href = $(el).attr("href") || "";
+      if (new RegExp(`/rba-board-minutes/${annee}/\\d{4}-\\d{2}-\\d{2}\\.html$`).test(href)) {
+        dernierLien = href.startsWith("http") ? href : `https://www.rba.gov.au${href}`;
+      }
+    });
+
+    if (dernierLien) return dernierLien;
+  }
+
+  throw new Error(
+    `Aucun lien de minutes trouve sur les index ${anneeCourante} et ${anneeCourante - 1}`
+  );
+}
+
 async function scraperPage(url) {
   const response = await fetchAvecRetry(url, { headers: HEADERS_NAVIGATEUR });
   if (!response.ok) {
-    throw new Error(`Échec scraping page RBA (${url}) : HTTP ${response.status}`);
+    throw new Error(`Echec scraping page RBA (${url}) : HTTP ${response.status}`);
   }
   const html = await response.text();
   const $ = cheerio.load(html);
@@ -85,10 +111,6 @@ async function scraperPage(url) {
   return paragraphes.join("\n\n");
 }
 
-// ─────────────────────────────────────────────────────────────
-// Une fonction par catégorie
-// ─────────────────────────────────────────────────────────────
-
 async function scraperStatement() {
   const items = await lireListingMediaReleases();
   const decision = items.find((it) =>
@@ -96,15 +118,13 @@ async function scraperStatement() {
       it.titre.toLowerCase().includes(mot)
     )
   );
-  if (!decision) throw new Error("Media Release (décision) : aucun item trouvé");
+  if (!decision) throw new Error("Media Release (decision) : aucun item trouve");
   return await scraperPage(decision.lien);
 }
 
 async function scraperMinutes() {
-  const items = await lireListingMediaReleases();
-  const minutes = items.find((it) => it.titre.toLowerCase().includes("minutes"));
-  if (!minutes) throw new Error("Minutes : aucun item trouvé");
-  return await scraperPage(minutes.lien);
+  const lien = await trouverDernierLienMinutes();
+  return await scraperPage(lien);
 }
 
 async function scraperDiscours() {
@@ -126,12 +146,8 @@ async function scraperBeigeBook() {
 }
 
 async function scraperPresseConference() {
-  throw new Error("Catégorie non applicable pour la RBA (pas de conférence de presse systématique)");
+  throw new Error("Categorie non applicable pour la RBA (pas de conference de presse systematique)");
 }
-
-// ─────────────────────────────────────────────────────────────
-// Routeur — n'exécute QUE la catégorie demandée
-// ─────────────────────────────────────────────────────────────
 
 const CATEGORIES = {
   statement: scraperStatement,
@@ -145,7 +161,7 @@ const CATEGORIES = {
 export async function scraperRBA(categorie) {
   const fonction = CATEGORIES[categorie];
   if (!fonction) {
-    throw new Error(`Catégorie inconnue pour RBA : "${categorie}"`);
+    throw new Error(`Categorie inconnue pour RBA : "${categorie}"`);
   }
   return await fonction();
 }
