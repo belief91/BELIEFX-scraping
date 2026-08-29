@@ -7,6 +7,10 @@
  * Nom de route volontairement sans "-statement" : "statement" n'est
  * qu'une des 6 valeurs possibles du paramètre `categorie`, pas le nom de
  * la route elle-même.
+ *
+ * AJOUT (29/08) : route /scrape/test-central-bank, isolée, pour une
+ * simulation de production sans dépendre d'un vrai événement du jour.
+ * Voir scrapers/testScraperFed.js.
  */
 
 import "dotenv/config";
@@ -144,9 +148,6 @@ async function scraperTV5Monde() {
 }
 
 // ---- Banques centrales — AJOUT (manquait entièrement) ----
-// RBNZ inclus (fichier scraperRBNZ.js confirmé présent). Norges Bank et
-// Riksbank absents du routeur : aucun fichier scraper trouvé pour elles
-// dans le repo — à ajouter si/quand ces fichiers existent.
 const SCRAPERS_PAR_BANQUE = {
   Fed: scraperFed,
   ECB: scraperECB,
@@ -210,6 +211,34 @@ app.post("/scrape/central-bank", verifierSecret, async (req, res) => {
     res.json({ success: true, texte });
   } catch (error) {
     console.error(`Erreur /scrape/central-bank (${banque}/${categorie}) :`, error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * ROUTE DE TEST ISOLÉE (29/08) — aucun lien avec la route de production
+ * ci-dessus. Utilise testScraperFed.js (pas scraperFed.js) : pas de
+ * vérification de date, retourne toujours "ce qui est présent au
+ * moment du scraping". Sert uniquement à valider 4x/jour, via un cron
+ * réel côté test-trade-, que la mécanique scrape -> filtre -> Back4App
+ * -> R2 fonctionne, sans dépendre d'un vrai événement du jour.
+ *
+ * POST /scrape/test-central-bank
+ * Body : { categorie: "statement"|"minutes"|"presseConference"|"discours"|"monetaryPolicyReport"|"beigeBook" }
+ */
+app.post("/scrape/test-central-bank", verifierSecret, async (req, res) => {
+  const { categorie } = req.body || {};
+
+  if (!categorie) {
+    return res.status(400).json({ success: false, error: "Paramètre 'categorie' manquant" });
+  }
+
+  try {
+    const { testScraperFed } = await import("./scrapers/testScraperFed.js");
+    const resultat = await testScraperFed(categorie);
+    res.json({ success: true, ...resultat });
+  } catch (error) {
+    console.error(`Erreur /scrape/test-central-bank (Fed/${categorie}) :`, error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
