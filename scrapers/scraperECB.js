@@ -10,6 +10,17 @@
 // - monetaryPolicyReport : "Economic Bulletin" (équivalent périodique ECB)
 // - beigeBook : "Financial Stability Review" (équivalent enquête/rapport
 //   périodique le plus proche pour l'ECB)
+//
+// AJOUT (flux continu) : chaque fonction de catégorie retourne maintenant
+// { texte, pubDate, source } au lieu du texte seul. pubDate vient de l'item
+// RSS (date de publication réelle), source est l'URL du document scrapé.
+// Le flux continu en a besoin : la vraie date de publication ancre
+// bc_reference (lib/bc-state), une date de scraping la fausserait.
+//   - scraperECBAvecMeta(categorie) -> { texte, pubDate, source }
+//   - scraperECB(categorie)         -> texte seul, STRICTEMENT inchangé pour
+//     la production (index.js, /scrape/central-bank, test-ecb.js).
+// Aucune logique de découverte dupliquée : scraperECB délègue à
+// scraperECBAvecMeta.
 
 import * as cheerio from "cheerio";
 import { fetchAvecRetry } from "./fetchUtils.js";
@@ -38,6 +49,11 @@ async function lireItemsRSS(url) {
     items.push({
       titre: $(el).find("title").text().trim(),
       lien: $(el).find("link").text().trim(),
+      // RSS 2.0 : <pubDate> ; repli sur <dc:date> (RSS 1.0 / RDF)
+      pubDate:
+        $(el).find("pubDate").first().text().trim() ||
+        $(el).find("dc\\:date").first().text().trim() ||
+        null,
     });
   });
   return items;
@@ -60,7 +76,7 @@ async function scraperPage(url) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Une fonction par catégorie
+// Une fonction par catégorie — retournent { texte, pubDate, source }
 // ─────────────────────────────────────────────────────────────
 
 async function scraperStatementOuPresseConference() {
@@ -78,7 +94,7 @@ async function scraperStatementOuPresseConference() {
   if (!decision) {
     throw new Error("Décision/Statement : aucun item trouvé dans le flux press.html");
   }
-  return await scraperPage(decision.lien);
+  return { texte: await scraperPage(decision.lien), pubDate: decision.pubDate, source: decision.lien };
 }
 
 async function scraperMinutes() {
@@ -95,7 +111,7 @@ async function scraperMinutes() {
   if (!accounts) {
     throw new Error("Monetary Policy Accounts : aucun item trouvé dans la fenêtre RSS actuelle");
   }
-  return await scraperPage(accounts.lien);
+  return { texte: await scraperPage(accounts.lien), pubDate: accounts.pubDate, source: accounts.lien };
 }
 
 async function scraperDiscours() {
@@ -111,7 +127,7 @@ async function scraperDiscours() {
   if (!discours) {
     throw new Error("Discours : aucun item trouvé dans la fenêtre RSS actuelle");
   }
-  return await scraperPage(discours.lien);
+  return { texte: await scraperPage(discours.lien), pubDate: discours.pubDate, source: discours.lien };
 }
 
 async function scraperMonetaryPolicyReport() {
@@ -126,7 +142,7 @@ async function scraperMonetaryPolicyReport() {
   if (!bulletin) {
     throw new Error("Economic Bulletin : aucun item trouvé dans la fenêtre RSS actuelle");
   }
-  return await scraperPage(bulletin.lien);
+  return { texte: await scraperPage(bulletin.lien), pubDate: bulletin.pubDate, source: bulletin.lien };
 }
 
 async function scraperBeigeBook() {
@@ -141,7 +157,7 @@ async function scraperBeigeBook() {
   if (!fsr) {
     throw new Error("Financial Stability Review : aucun item trouvé dans la fenêtre RSS actuelle");
   }
-  return await scraperPage(fsr.lien);
+  return { texte: await scraperPage(fsr.lien), pubDate: fsr.pubDate, source: fsr.lien };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -157,10 +173,17 @@ const CATEGORIES = {
   beigeBook: scraperBeigeBook,
 };
 
-export async function scraperECB(categorie) {
+/** Version avec métadonnées : { texte, pubDate, source } (flux continu). */
+export async function scraperECBAvecMeta(categorie) {
   const fonction = CATEGORIES[categorie];
   if (!fonction) {
     throw new Error(`Catégorie inconnue pour ECB : "${categorie}"`);
   }
   return await fonction();
+}
+
+/** Version production : texte seul, comportement inchangé. */
+export async function scraperECB(categorie) {
+  const { texte } = await scraperECBAvecMeta(categorie);
+  return texte;
 }
