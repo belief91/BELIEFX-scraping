@@ -11,6 +11,12 @@
  * AJOUT (29/08) : route /scrape/test-central-bank, isolée, pour une
  * simulation de production sans dépendre d'un vrai événement du jour.
  * Voir scrapers/testScraperFed.js.
+ *
+ * AJOUT (flux continu) : route /scrape/central-bank-meta (POST), meme
+ * contrat que /scrape/central-bank mais retourne { texte, pubDate, source }.
+ * La vraie date de publication ancre bc_reference cote test-trade-.
+ * Une banque s'y ajoute (SCRAPERS_META_PAR_BANQUE) quand son scraper
+ * expose scraperXxxAvecMeta ; /scrape/central-bank reste inchange.
  */
 
 import "dotenv/config";
@@ -19,7 +25,7 @@ import * as cheerio from "cheerio";
 import { runGeopoliticalPipeline } from "./geopolitics/pipeline.js";
 
 import { scraperFed } from "./scrapers/scraperFed.js";
-import { scraperECB } from "./scrapers/scraperECB.js";
+import { scraperECB, scraperECBAvecMeta } from "./scrapers/scraperECB.js";
 import { scraperBoE } from "./scrapers/scraperBoE.js";
 import { scraperBoJ } from "./scrapers/scraperBoJ.js";
 import { scraperSNB } from "./scrapers/scraperSNB.js";
@@ -211,6 +217,46 @@ app.post("/scrape/central-bank", verifierSecret, async (req, res) => {
     res.json({ success: true, texte });
   } catch (error) {
     console.error(`Erreur /scrape/central-bank (${banque}/${categorie}) :`, error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /scrape/central-bank-meta
+ * Body : { banque, categorie } — memes valeurs que /scrape/central-bank.
+ * Reponse : { success: true, texte, pubDate, source }
+ *   pubDate : date de publication reelle (RSS) ou null si la source n'en fournit pas
+ *   source  : URL du document scrape
+ * Banques disponibles : celles de SCRAPERS_META_PAR_BANQUE uniquement.
+ */
+const SCRAPERS_META_PAR_BANQUE = {
+  // Fed : scraper du flux de test (retourne deja { texte, pubDate, source })
+  Fed: async (categorie) => {
+    const { testScraperFed } = await import("./scrapers/testScraperFed.js");
+    return testScraperFed(categorie);
+  },
+  ECB: scraperECBAvecMeta,
+};
+
+app.post("/scrape/central-bank-meta", verifierSecret, async (req, res) => {
+  const { banque, categorie } = req.body || {};
+
+  const scraperCible = SCRAPERS_META_PAR_BANQUE[banque];
+  if (!scraperCible) {
+    return res.status(400).json({
+      success: false,
+      error: `Banque non disponible avec metadonnees : "${banque}" (disponibles : ${Object.keys(SCRAPERS_META_PAR_BANQUE).join(", ")})`,
+    });
+  }
+  if (!categorie) {
+    return res.status(400).json({ success: false, error: "Paramètre 'categorie' manquant" });
+  }
+
+  try {
+    const resultat = await scraperCible(categorie);
+    res.json({ success: true, ...resultat });
+  } catch (error) {
+    console.error(`Erreur /scrape/central-bank-meta (${banque}/${categorie}) :`, error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
