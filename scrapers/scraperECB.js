@@ -85,10 +85,18 @@ async function scraperStatementOuPresseConference() {
   const statement = items.find((it) =>
     it.lien.includes("/press/press_conference/monetary-policy-statement/")
   );
+  // Repli : un communiqué dont le titre évoque la politique monétaire (ex :
+  // "Monetary policy decisions", /press/pr/...), publié avant l'introductory
+  // statement. FIX (19/10) : jamais un discours ni un entretien (/press/key/) :
+  // le flux continu a ancré la "décision" ECB sur un discours du 5 octobre
+  // (ecb.sp261005) dont le titre contenait "monetary policy", le vrai
+  // communiqué étant sorti de la fenêtre RSS.
   const decision =
     statement ||
-    items.find((it) =>
-      MOTS_CLES_TITRE_MOPO.some((mot) => it.titre.toLowerCase().includes(mot))
+    items.find(
+      (it) =>
+        !it.lien.includes("/press/key/") &&
+        MOTS_CLES_TITRE_MOPO.some((mot) => it.titre.toLowerCase().includes(mot))
     );
 
   if (!decision) {
@@ -122,7 +130,11 @@ async function scraperDiscours() {
       it.titre.toLowerCase().includes("speech by") ||
       it.titre.toLowerCase().includes("speech at") ||
       it.titre.toLowerCase().includes("lecture by") ||
-      it.titre.toLowerCase().includes("keynote")
+      it.titre.toLowerCase().includes("keynote") ||
+      // FIX (19/10) : les discours ECB ont souvent pour titre leur sujet
+      // ("Monetary policy in a ...") et non "Speech by..." ; leur URL porte
+      // le code ecb.sp<AAMMJJ>, fiable.
+      /\/ecb\.sp\d{6}/.test(it.lien)
   );
   if (!discours) {
     throw new Error("Discours : aucun item trouvé dans la fenêtre RSS actuelle");
